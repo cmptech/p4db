@@ -1,0 +1,211 @@
+//@ref p_sqlite3, p_mysql2
+//SELECT => {STS,rows}, ELSE => {STS, lastID, af}
+module.exports = (opts) => {
+	var {
+		debug_level = 1,
+		type,//default 'mysql'
+		//common
+		database,
+		timezone,
+		//mysql ------------------------
+		host, user, password, port,
+		//waitForConnections=true,
+		// connectionLimit= 10,
+		// queueLimit= 0,
+		// acquireTimeout,
+		//sqlite -----------------------
+		WAL,
+		autocheckpoint,
+		logger = console,
+	} = opts || {};
+
+	var qstr = (s) => ["'",s&&s.replace(new RegExp("'",'g'),"'")||'',"'"].join('');
+	var qstr_arr = (a)=>{ var rt_a=[]; for(var k in a){ rt_a.push(qstr(a[k])); } return rt_a.join(',') };
+
+	var pool_a={};
+
+	switch(type){
+		case 'sqlite3':
+		case 'sqlite':
+			if(database) db=new sqlite3.Database(database);
+			else throw new Error('p_db(sqlite) needs .database');
+			if(WAL) db.exec("PRAGMA journal_mode = WAL");
+			if(autocheckpoint) db.exec("PRAGMA wal_autocheckpoint=N");
+			//TODO timezone
+
+			var select_p = sql => new Promise( (resolve, reject) =>{
+				db.all(sql,function(err,rows){
+					if(err) reject(err);
+					else resolve({STS:'OK',rows});
+				});
+			});
+			var delay_p = async(ms)=>new Promise( resolve => setTimeout( ()=>resolve(true), ms ) );
+
+			//TODO binding?
+			var exec_p=function(sql,binding,max_try_for_busy){
+
+				sql=sql?sql.trim():'';
+
+				if (''==sql) return Promise.resolve({STS:'KO',errmsg:'exec_p meets a empty .sql?'});
+
+				if(sql.substr(0,6).toUpperCase()=='SELECT') return select_p(sql);
+
+				//our strategy for sqlite lock is to try few times more.... may improve again in future
+				if('undefined'==typeof max_try_for_busy) max_try_for_busy=7;
+
+				return new Promise( (resolve, reject) =>{
+					db.serialize(function(){
+						db.run(sql, async(err,rst)=>{
+							if(!err){
+								var {lastID,changes}=db;//this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
+								resolve({STS:'OK',sql,lastID,changes,af:changes});
+								return;
+							}
+							try {
+								var {code}=err;
+								if('SQLITE_BUSY'==code){
+									if(max_try_for_busy>0){
+										await delay_p(Math.random()*50+100);
+										if(debug>0) logger.log('SQLITE_BUSY_RETRY/'+max_try_for_busy,sql);
+										var rst = await exec_p(sql,binding,max_try_for_busy-1);
+										resolve(rst);
+									}else{
+										if(debug>1) logger.log('SQLITE_BUSY_B',max_try_for_busy,sql);
+										reject(err);
+									}
+								}else{
+									if(debug>0) logger.log('SQLITE_ERR_A',code,max_try_for_busy,sql);
+									reject(err);
+								}
+							}catch(err){
+								if(debug>1) logger.log('SQLITE_BUSY_ERR',max_try_for_busy,sql);
+								reject(err);
+							}
+						});
+					});
+				});
+			};
+			break;
+		case 'mysql2':
+		case 'mysql':
+		default:
+			const driver = require('mysql2');
+
+			var pool_key = user + '@' + host + ':' + port;
+			var pool = pool_a[pool_key];
+
+			if (!pool) { pool_a[pool_key] = pool = driver.createPool(opts); }
+
+			//TODO timezone
+			//TODO debug how many free left at the pool..
+
+			var exec_p = async(sql, binding) => {
+				if (typeof(sql) == 'object') { var { sql, binding } = sql; }
+				if(debug_level>0) logger.log('exec_p.sql=', sql);
+				return new Promise(
+					// pool.getConnection((err, conn) => {
+					// 	//logger.log('pool.getConnection');
+					// 	if (err) return reject(err);
+					// 	conn.query(sql, binding, function(err, rst, fields) {
+					// 		//conn.destroy();
+					// 		pool.releaseConnection(conn);
+					// 		if (err) { reject(err) }
+					// 		else { resolve({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows }) }
+					// 	});
+					// });
+					//query() has auto release algo:
+					(resolve, reject) => pool.query(sql, binding, (err, rst, fields) =>
+						(err) ? reject(err) : resolve({ STS: 'OK', rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows
+							/*, cols: fields*/
+						})
+					)
+				).catch(err => (logger.log(err), Promise.reject(err)));
+			};
+	}
+
+	var select_one_p = (sql, binding) => exec_p(sql, binding).then(rst => {
+		if (rst && rst.rows && rst.rows[0]) {
+			rst.row = rst.rows[0];
+		}
+		return rst;
+	});
+
+	var upsert_p = async (params) => {
+		var { table, toUpdate, toFind, insert_first } = params;
+		var s_kv = "",
+			a_kv = [],
+			//s_w = "",
+			a_w = [],
+			s_v = "",
+			a_v = [],
+			s_k = "",
+			a_k = [],
+			v;
+		for (var k in toFind) {
+			v = toFind[k];
+			a_w.push("" + k + "=" + qstr(v));
+		}
+		if (!a_w.length > 0) throw new Error('upsert() need .toFind');
+		var where = "WHERE " + a_w.join(" AND ");
+		for (var k in toUpdate) {
+			v = toUpdate[k];
+			a_v.push(qstr(v) + " AS " + k);
+			a_k.push(k);
+			a_kv.push("" + k + "=" + qstr(v));
+		}
+		s_k = a_k.join(",");
+		s_v = a_v.join(",");
+		s_kv = a_kv.join(",");
+
+		var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
+		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
+
+		var sql_2 = `UPDATE ${table} SET ${s_kv} ${where}`;
+
+		var lastID = -1;
+		var af = -1;
+
+		if (insert_first) { //try insert first
+			return exec_p(sql_1)
+				.then(rst => {
+					lastID = rst.lastID;
+					return exec_p(sql_2)
+						.then(rst => {
+							af = rst.af;
+							return Proimse.resolve({ STS: af > 0 ? 'OK' : 'KO', lastID, af });
+						});
+				})
+				.catch(err => {
+					if (debug_level > 0)
+						logger.log('DEBUG upsert_p.err=', err, sql_1, sql_2);
+					return Proimse.reject(err);
+				});
+		}
+		else { //try update first (default)
+			return exec_p(sql_2)
+				.then(rst => {
+					af = rst.af;
+					if (af > 0) {
+						return Promise.resolve({ STS: "OK", lastID, af });
+					}
+					else {
+						return exec_p(sql_1)
+							.then(rst => {
+								lastID = rst.lastID;
+								return Promise.resolve({ STS: lastID > 0 ? 'OK' : 'KO', lastID, af });
+							});
+					}
+				})
+				.catch(err => {
+					if (debug_level > 0)
+						logger.log('DEBUG upsert_p.err=', err, sql_1, sql_2);
+					return Promise.reject(err);
+				});
+		}
+	};//upsert_p
+	var setDebugLevel = (d) => {
+		if(d>0)logger.log(module_name+'.setDebugLevel=',d);
+		debug=d;
+	};
+	return { qstr, qstr_arr, exec_p, upsert_p, select_one_p, setDebugLevel };
+};
