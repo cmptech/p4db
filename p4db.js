@@ -1,7 +1,5 @@
 //@ref p_sqlite3, p_mysql2
 //SELECT => {STS,rows}, ELSE => {STS, lastID, af}
-var module_name = 'p4db';
-var module_version = '0.1.2';
 module.exports = function(opts){
 
 	var {
@@ -23,7 +21,7 @@ module.exports = function(opts){
 		logger = console,
 	} = opts || {};
 
-	var qstr = (s) => ["'", s && s.replace(new RegExp("'", 'g'), "'") || '', "'"].join('');
+	var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "'") || '', "'"].join('');
 	var qstr_arr = (a) => { var rt_a = []; for (var k in a) { rt_a.push(qstr(a[k])); } return rt_a.join(',') };
 
 	var pool_a = {};
@@ -234,7 +232,7 @@ module.exports = function(opts){
 		}
 	}; //upsert_p
 	var setDebugLevel = (d) => {
-		if (d > 0) logger.log(module_name + '.setDebugLevel=', d);
+		if (d > 0) logger.log('p4db.setDebugLevel=', d);
 		debug_level = d;
 	};
 	return { qstr, qstr_arr, exec_p, upsert_p, select_one_p, setDebugLevel };
