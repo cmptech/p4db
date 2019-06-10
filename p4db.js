@@ -145,7 +145,7 @@ module.exports = function(opts){
 			};
 
 			if(timezone){
-				poo.query("SET time_zone='"+timezone+"'");
+				pool.query("SET time_zone='"+timezone+"'");
 			}
 	}
 
