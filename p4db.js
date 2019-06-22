@@ -71,6 +71,7 @@ module.exports = function(init_opts){
 
 			var delay_p = async(ms) => new Promise(resolve => setTimeout(() => resolve(true), ms));
 
+			//TODO raw_exec_p = (sql,binding) => new Promise( (resolve,reject)=>{db.serialize(db.run())});
 			exec_p = (opts, binding, max_try_for_busy) => {
 				var {sql,binding}=reset_opts(opts,binding);
 				if (debug_level > 0) logger.log('exec_p.sql=', sql);
@@ -131,6 +132,7 @@ module.exports = function(init_opts){
 			var pool = pool_a[pool_key];
 			if (!pool) pool_a[pool_key] = pool = mysql_p.createPool(init_opts);
 
+			//raw_exec_p = (sql,binding) => pool.query(sql,binding); //return [rst,fields];
 			exec_p = async(opts, binding) => {
 				var {sql,binding}=reset_opts(opts,binding);
 				if (debug_level > 0) logger.log('exec_p.sql=', sql);
@@ -179,8 +181,9 @@ module.exports = function(init_opts){
 		s_v = a_v.join(",");
 		s_kv = a_kv.join(",");
 
-		var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
-		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
+		//var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
+		//var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
+		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT ${s_v} FROM ${table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
 
 		var sql_2 = `UPDATE ${table} SET ${s_kv} ${where}`;
 
