@@ -1,19 +1,9 @@
 {
   "name": "p4db",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "description": "",
   "main": "p4db.js",
-  "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
-  },
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/cmptech/p4db.git"
-  },
   "author": "",
   "license": "ISC",
-  "bugs": {
-    "url": "https://github.com/cmptech/p4db/issues"
-  },
   "homepage": "https://github.com/cmptech/p4db#readme"
 }

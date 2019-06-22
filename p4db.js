@@ -1,7 +1,8 @@
 //@ref p_sqlite3, p_mysql2
 //SELECT => {STS,rows}, ELSE => {STS, lastID, af}
-module.exports = function(opts){
+module.exports = function(init_opts){
 
+	//https://github.com/mysqljs/mysql
 	var {
 		debug_level = 1,
 		type, //default 'mysql'
@@ -12,16 +13,21 @@ module.exports = function(opts){
 		host, user, port,
 		// password, 
 		//waitForConnections=true,
-		// connectionLimit= 10,
-		// queueLimit= 0,
-		// acquireTimeout,
+		connectionLimit= 10,//connectionLimit: The maximum number of connections to create at once. (Default: 10)
+		//queueLimit: The maximum number of connection requests the pool will queue before returning an error from getConnection. If set to 0, there is no limit to the number of queued connection requests. (Default: 0)
+		// queueLimit= 0,//
+		acquireTimeout=3,// The milliseconds before a timeout occurs during the connection acquisition. This is slightly different from connectTimeout, because acquiring a pool connection does not always involve making a connection. If a connection request is queued, the time the request spends in the queue does not count towards this timeout. (Default: 10000)
+		connectTimeout=3,// The milliseconds before a timeout occurs during the initial connection to the MySQL server. (Default: 10000)
 		//sqlite -----------------------
 		WAL,
 		autocheckpoint,
 		logger = console,
-	} = opts || {};
+	} = init_opts || {};
 
-	var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "'") || '', "'"].join('');
+	delete init_opts.logger;//elimit the warning
+
+	//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
+	var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
 	var qstr_arr = (a) => { var rt_a = []; for (var k in a) { rt_a.push(qstr(a[k])); } return rt_a.join(',') };
 
 	var pool_a = {};
@@ -33,7 +39,7 @@ module.exports = function(opts){
 				sql = opts.sql;
 			}
 			else{
-				//TODO need to build sql from opts ...
+				//TODO build sql from opts ...
 				//select/pager/limit/order|orderby etc.
 			}
 			if(opts.binding) binding = opts.binding;
@@ -119,36 +125,25 @@ module.exports = function(opts){
 		case 'mysql2':
 		case 'mysql':
 		default:
-			const driver = require('mysql2');
+			const mysql_p = require('mysql2/promise');
 
 			var pool_key = user + '@' + host + ':' + port;
 			var pool = pool_a[pool_key];
-
-			if (!pool) {
-				pool_a[pool_key] = pool = driver.createPool(opts);
-			}
+			if (!pool) pool_a[pool_key] = pool = mysql_p.createPool(init_opts);
 
 			exec_p = async(opts, binding) => {
 				var {sql,binding}=reset_opts(opts,binding);
 				if (debug_level > 0) logger.log('exec_p.sql=', sql);
-				//query() has auto release :
-				return new Promise( (resolve, reject) =>
-					pool.query(sql, binding, (err, rst, fields) =>
-						(err) ? reject(err) : resolve({
-							STS: 'OK',
-							rows: rst.rsa || rst,
-							lastID: rst.insertId,
-							af: rst.affectedRows
-						})
-					)
-				).catch(err => (logger.log(err), Promise.reject(err)));
+				try{
+					var [rst,fields] = await pool.query(sql,binding);
+					return { STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows };
+				}catch(err){
+					return Promise.reject(err);
+				}
 			};
 
-			if(timezone){
-				pool.query("SET time_zone='"+timezone+"'");
-			}
+			if(timezone) exec_p("SET time_zone='"+timezone+"'");
 	}
-
 	//NOTES: page_exec_p should moved to the sql-wrapper or Orm layer, keep p4db as tiny.
 
 	var select_one_p = (sql, binding) => exec_p(sql, binding).then(rst => {
@@ -162,7 +157,6 @@ module.exports = function(opts){
 		var { table, toUpdate, toFind, insert_first } = params;
 		var s_kv = "",
 			a_kv = [],
-			//s_w = "",
 			a_w = [],
 			s_v = "",
 			a_v = [],
@@ -193,42 +187,27 @@ module.exports = function(opts){
 		var lastID = -1;
 		var af = -1;
 
+		//NOTES: lastID only works for auto-incredment field !
 		if (insert_first) { //try insert first
-			return exec_p(sql_1)
-				.then(rst => {
-					lastID = rst.lastID;
-					return exec_p(sql_2)
-						.then(rst => {
-							af = rst.af;
-							return Promise.resolve({ STS: af > 0 ? 'OK' : 'KO', lastID, af });
-						});
-				})
-				.catch(err => {
-					if (debug_level > 0)
-						logger.log('DEBUG upsert_p.err=', err, sql_1, sql_2);
-					return Promise.reject(err);
-				});
+			var rst = await exec_p(sql_1);
+			lastID = rst.lastID;
+			af=rst.af;//
+			if(af>0){
+			}else{
+				var rst = await exec_p(sql_2);
+				af=rst.af;//
+			}
+			return { STS: af > 0 ? 'OK' : 'KO', lastID, af };
 		}
-		else { //try update first (default)
-			return exec_p(sql_2)
-				.then(rst => {
-					af = rst.af;
-					if (af > 0) {
-						return Promise.resolve({ STS: "OK", lastID, af });
-					}
-					else {
-						return exec_p(sql_1)
-							.then(rst => {
-								lastID = rst.lastID;
-								return Promise.resolve({ STS: lastID > 0 ? 'OK' : 'KO', lastID, af });
-							});
-					}
-				})
-				.catch(err => {
-					if (debug_level > 0)
-						logger.log('DEBUG upsert_p.err=', err, sql_1, sql_2);
-					return Promise.reject(err);
-				});
+		else {
+			var rst = await exec_p(sql_2);
+			af = rst.af;
+			if (af > 0) { return { STS: "OK", lastID, af }; }
+			else {
+				var rst = await exec_p(sql_1);
+				lastID = rst.lastID;
+				return { STS: lastID > 0 ? 'OK' : 'KO', lastID, af };
+			}
 		}
 	}; //upsert_p
 	var setDebugLevel = (d) => {
@@ -237,15 +216,4 @@ module.exports = function(opts){
 	};
 	return { qstr, qstr_arr, exec_p, upsert_p, select_one_p, setDebugLevel };
 };
-
-//NOTES
-// pool.getConnection((err, conn) => {
-// 	if (err) return reject(err);
-// 	conn.query(sql, binding, function(err, rst, fields) {
-// 		//conn.destroy();//NO
-// 		pool.releaseConnection(conn);
-// 		if (err) { reject(err) }
-// 		else { resolve({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows }) }
-// 	});
-// });
 
