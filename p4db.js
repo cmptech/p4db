@@ -144,7 +144,10 @@ module.exports = function(init_opts){
 				}
 			};
 
-			if(timezone) exec_p("SET time_zone='"+timezone+"'");
+			if(timezone){
+				exec_p("SET time_zone='"+timezone+"'")
+				.catch(err=>logger.log('ERR',err));
+			}
 	}
 	//NOTES: page_exec_p should moved to the sql-wrapper or Orm layer, keep p4db as tiny.
 
@@ -181,9 +184,10 @@ module.exports = function(init_opts){
 		s_v = a_v.join(",");
 		s_kv = a_kv.join(",");
 
-		//var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
-		//var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
-		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT ${s_v} FROM ${table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
+		var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
+		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
+
+		//var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT ${s_v} FROM ${table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
 
 		var sql_2 = `UPDATE ${table} SET ${s_kv} ${where}`;
 
