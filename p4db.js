@@ -85,9 +85,10 @@ module.exports = function(init_opts){
 
 				return new Promise((resolve, reject) => {
 					db.serialize(function() {
-						db.run(sql, async(err, rst) => {
+						db.run(sql, async function(err, rst){//NOTES 这里不要用箭头函数，因为要用到 'this'
 							if (!err) {
-								var { lastID, changes } = db; //this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
+								//logger.log('tmp debug this=',this);
+								var { lastID, changes } = this; //db; //this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
 								resolve({ STS: 'OK', sql, lastID, changes, af: changes });
 								return;
 							}
@@ -183,6 +184,8 @@ module.exports = function(init_opts){
 		s_k = a_k.join(",");
 		s_v = a_v.join(",");
 		s_kv = a_kv.join(",");
+
+		//NOTES:将来有否机会实现合成 ?
 
 		var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
 		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
