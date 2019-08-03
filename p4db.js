@@ -4,8 +4,6 @@ module.exports = function(init_opts){
 
 	//https://github.com/mysqljs/mysql
 	var {
-		debug_level = 1,
-		type, //default 'mysql'
 		//common ------------------------
 		database,
 		timezone,
@@ -21,10 +19,11 @@ module.exports = function(init_opts){
 		//sqlite -----------------------
 		WAL,
 		autocheckpoint,
-		logger = console,
-	} = init_opts || {};
 
-	delete init_opts.logger;//elimit the warning
+		type, //default 'mysql'
+		logger = console,
+		debug_level = 1,
+	} = init_opts || {};
 
 	//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
 	var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
@@ -131,6 +130,9 @@ module.exports = function(init_opts){
 
 			var pool_key = user + '@' + host + ':' + port;
 			var pool = pool_a[pool_key];
+			//elimit the warning
+			delete init_opts.logger;
+			delete init_opts.type;
 			if (!pool) pool_a[pool_key] = pool = mysql_p.createPool(init_opts);
 
 			//raw_exec_p = (sql,binding) => pool.query(sql,binding); //return [rst,fields];
