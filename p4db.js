@@ -25,10 +25,6 @@ module.exports = function(init_opts){
 		debug_level = 1,
 	} = init_opts || {};
 
-	//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
-	var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
-	var qstr_arr = (a) => { var rt_a = []; for (var k in a) { rt_a.push(qstr(a[k])); } return rt_a.join(',') };
-
 	var pool_a = {};
 
 	var reset_opts = (opts,binding) =>{
@@ -55,6 +51,9 @@ module.exports = function(init_opts){
 	switch (type) {
 		case 'sqlite3':
 		case 'sqlite':
+			var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
+			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
+
 			const sqlite3 = require('sqlite3');
 			if (database) var db = new sqlite3.Database(database);
 			else throw new Error('p_db(sqlite) needs .database');
@@ -126,6 +125,9 @@ module.exports = function(init_opts){
 		case 'mysql2':
 		case 'mysql':
 		default:
+			//NOTES: mysql TODO check (SELECT @@GLOBAL.sql_mode) with NO_BACKSLASH_ESCAPES ...
+			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
+			var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
 			const mysql_p = require('mysql2/promise');
 
 			var pool_key = user + '@' + host + ':' + port;
@@ -152,6 +154,8 @@ module.exports = function(init_opts){
 				.catch(err=>logger.log('ERR',err));
 			}
 	}
+	var qstr_arr = (a) => { var rt_a = []; for (var k in a) { rt_a.push(qstr(a[k])); } return rt_a.join(',') };
+	
 	//NOTES: page_exec_p should moved to the sql-wrapper or Orm layer, keep p4db as tiny.
 
 	var select_one_p = (sql, binding) => exec_p(sql, binding).then(rst => {
