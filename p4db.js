@@ -6,7 +6,6 @@ module.exports = function(init_opts){
 	var {
 		//common ------------------------
 		database,
-		timezone,
 		//mysql ------------------------
 		host, user, port,
 		// password, 
@@ -118,9 +117,6 @@ module.exports = function(init_opts){
 				});
 			};
 
-			if(timezone){
-				//TODO
-			}
 			break;
 		case 'mysql2':
 		case 'mysql':
@@ -148,11 +144,6 @@ module.exports = function(init_opts){
 					return Promise.reject(err);
 				}
 			};
-
-			if(timezone){
-				exec_p("SET time_zone='"+timezone+"'")
-				.catch(err=>logger.log('ERR',err));
-			}
 	}
 	var qstr_arr = (a) => { var rt_a = []; for (var k in a) { rt_a.push(qstr(a[k])); } return rt_a.join(',') };
 	
