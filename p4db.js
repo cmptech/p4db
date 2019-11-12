@@ -50,8 +50,10 @@ module.exports = function(init_opts){
 	switch (type) {
 		case 'sqlite3':
 		case 'sqlite':
-			var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
 			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
+			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
+			var qstr = (s) => ["'", (s==null || s==undefined) ? '' : (''+s).replace(new RegExp("'", 'g'), "''"), "'"].join('');
+			
 
 			const sqlite3 = require('sqlite3');
 			if (database) var db = new sqlite3.Database(database);
@@ -123,7 +125,8 @@ module.exports = function(init_opts){
 		default:
 			//NOTES: mysql TODO check (SELECT @@GLOBAL.sql_mode) with NO_BACKSLASH_ESCAPES ...
 			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
-			var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
+			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
+			var qstr = (s) => ["'", (s==null || s==undefined) ? '' : (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\"), "'"].join('');
 			const mysql_p = require('mysql2/promise');
 
 			var pool_key = user + '@' + host + ':' + port;
