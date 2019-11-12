@@ -211,9 +211,8 @@ module.exports = function(init_opts){
 			af = rst.af;
 			if (af > 0) { return { STS: "OK", lastID, af }; }
 			else {
-				var rst = await exec_p(sql_1);
-				lastID = rst.lastID;
-				return { STS: lastID > 0 ? 'OK' : 'KO', lastID, af };
+				let {lastID,af} = await exec_p(sql_1);
+				return { STS: af > 0 ? 'OK' : 'KO', lastID, af };
 			}
 		}
 	}; //upsert_p
