@@ -1,12 +1,9 @@
-//@ref p_sqlite3, p_mysql2
-//SELECT => {STS,rows}, ELSE => {STS, lastID, af}
+//@usage: SELECT => {STS, rows} or UPSERT => {STS, lastID, af}
 module.exports = function(init_opts){
-
-	//https://github.com/mysqljs/mysql
 	var {
 		//common ------------------------
 		database,
-		//mysql ------------------------
+		//mysql ------------------------ https://github.com/mysqljs/mysql
 		host, user, port,
 		// password, 
 		//waitForConnections=true,
@@ -15,45 +12,64 @@ module.exports = function(init_opts){
 		// queueLimit= 0,//
 		acquireTimeout=3,// The milliseconds before a timeout occurs during the connection acquisition. This is slightly different from connectTimeout, because acquiring a pool connection does not always involve making a connection. If a connection request is queued, the time the request spends in the queue does not count towards this timeout. (Default: 10000)
 		connectTimeout=3,// The milliseconds before a timeout occurs during the initial connection to the MySQL server. (Default: 10000)
+
 		//sqlite -----------------------
 		WAL,
 		autocheckpoint,
 
-		type, //default 'mysql'
+		type='mysql',
 		logger = console,
 		debug_level = 1,
 	} = init_opts || {};
 
 	var pool_a = {};
 
-	var reset_opts = (opts,binding) =>{
+	var _tune_opts = (opts,binding) =>{
 		var sql;
 		if (typeof(opts) == 'object') {
-			if (opts.sql) {
-				sql = opts.sql;
-			}
+			if (opts.sql) { sql = opts.sql; }
 			else{
-				//TODO build sql from opts ...
-				//select/pager/limit/order|orderby etc.
+				var {select,page,limit,order,orderby} = opts;//TODO build sql
 			}
 			if(opts.binding) binding = opts.binding;
 		}
-		else //if (typeof(opts) == 'string')
+		else if (typeof(opts) == 'string')
 		{
 			sql = opts;
+		}else{
+			throw new Error('TODO unsupport yet opts '+typeof(opts));
 		}
 		sql = sql ? sql.trim() : '';
 		return {sql,binding}
 	};
 
+	var P=async(f)=>('function'==typeof f)?new Promise(f):f;
+	var raw_p;
 	var exec_p;
 	switch (type) {
-		case 'sqlite3':
+		case 'sqlite3'://this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
 		case 'sqlite':
-			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
-			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
+
+			var select_p = (s,b)=>P((resolve,reject)=>db.all(s,b,(err,rows)=>err?reject(err):resolve({STS:'OK',rows})));
+
+			raw_p = (opts,binding) => P((resolve,reject) => {
+				var {sql,binding}=_tune_opts(opts,binding);
+				if (sql.substr(0, 6).toUpperCase() == 'SELECT') 
+					return select_p(sql,binding);
+				//db.all(sql, function(err, rows) {
+				//	var row = (rows && rows.length==1) ? rows[0] : undefined;
+				//	if (err) reject(err);
+				//	else resolve({ STS: 'OK', rows, row });
+				//})
+				else
+					db.serialize(function(){
+						db.run(sql, function(err, rst){
+							return err ? reject(err) : resolve({ STS: 'OK', sql, lastID: this.lastID, af: this.changes });
+						})
+					})
+			})
+
 			var qstr = (s) => ["'", (s==null || s==undefined) ? '' : (''+s).replace(new RegExp("'", 'g'), "''"), "'"].join('');
-			
 
 			const sqlite3 = require('sqlite3');
 			if (database) var db = new sqlite3.Database(database);
@@ -61,32 +77,23 @@ module.exports = function(init_opts){
 			if (WAL) db.exec("PRAGMA journal_mode = WAL");
 			if (autocheckpoint) db.exec("PRAGMA wal_autocheckpoint=N");
 
-			var select_p = sql => new Promise((resolve, reject) => {
-				db.all(sql, function(err, rows) {
-					if (err) reject(err);
-					else resolve({ STS: 'OK', rows });
-				});
-			});
+			var delay_p = async(ms) => P(resolve => setTimeout(() => resolve(true), ms));
 
-			var delay_p = async(ms) => new Promise(resolve => setTimeout(() => resolve(true), ms));
-
-			//TODO raw_exec_p = (sql,binding) => new Promise( (resolve,reject)=>{db.serialize(db.run())});
 			exec_p = (opts, binding, max_try_for_busy) => {
-				var {sql,binding}=reset_opts(opts,binding);
+				var {sql,binding}=_tune_opts(opts,binding);
 				if (debug_level > 0) logger.log('exec_p.sql=', sql);
 
-				if ('' == sql) return Promise.resolve({ STS: 'KO', errmsg: 'exec_p meets a empty .sql?' });
+				if ('' == sql) return P({ STS: 'KO', errmsg: 'exec_p meets a empty .sql?' });
 
 				if (sql.substr(0, 6).toUpperCase() == 'SELECT') return select_p(sql);
 
 				//our strategy for sqlite lock is to try few times more.... may improve again in future
 				if ('undefined' == typeof max_try_for_busy) max_try_for_busy = 7;
 
-				return new Promise((resolve, reject) => {
+				return P((resolve, reject) => {
 					db.serialize(function() {
 						db.run(sql, async function(err, rst){//NOTES 这里不要用箭头函数，因为要用到 'this'
 							if (!err) {
-								//logger.log('tmp debug this=',this);
 								var { lastID, changes } = this; //db; //this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
 								resolve({ STS: 'OK', sql, lastID, changes, af: changes });
 								return;
@@ -121,24 +128,28 @@ module.exports = function(init_opts){
 
 			break;
 		case 'mysql2':
-		case 'mysql':
+		case 'mysql'://using mysql2...
 		default:
 			//NOTES: mysql TODO check (SELECT @@GLOBAL.sql_mode) with NO_BACKSLASH_ESCAPES ...
-			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''") || '', "'"].join('');
-			//var qstr = (s) => ["'", s && (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\") || '', "'"].join('');
-			var qstr = (s) => ["'", (s==null || s==undefined) ? '' : (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\"), "'"].join('');
-			const mysql_p = require('mysql2/promise');
+			var qstr = (s) => ["'", (s==null) ? '' : (''+s).replace(new RegExp("'", 'g'), "''").replace(/\\/g,"\\\\"), "'"].join('');
+			const mysql_promise = require('mysql2/promise');
 
 			var pool_key = user + '@' + host + ':' + port;
 			var pool = pool_a[pool_key];
-			//elimit the warning
+
+			//eliminate the warning
 			delete init_opts.logger;
 			delete init_opts.type;
-			if (!pool) pool_a[pool_key] = pool = mysql_p.createPool(init_opts);
+			if (!pool) pool_a[pool_key] = pool = mysql_promise.createPool(init_opts);
 
-			//raw_exec_p = (sql,binding) => pool.query(sql,binding); //return [rst,fields];
+			// {STS, cols, rows, lastID, af}, TODO fields need handling...
+			// TODO _tune_opts()
+			raw_p = (sql,binding) => mysql_promise.createConnection.query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows })) //return [rst,fields];
+
+			//TODO shorten
+			//exec_p = (opts,binding) => _tune_opts(opts,binding) => 
 			exec_p = async(opts, binding) => {
-				var {sql,binding}=reset_opts(opts,binding);
+				var {sql,binding}=_tune_opts(opts,binding);
 				if (debug_level > 0) logger.log('exec_p.sql=', sql);
 				try{
 					var [rst,fields] = await pool.query(sql,binding);
@@ -149,13 +160,9 @@ module.exports = function(init_opts){
 			};
 	}
 	var qstr_arr = (a) => { var rt_a = []; for (var k in a) { rt_a.push(qstr(a[k])); } return rt_a.join(',') };
-	
-	//NOTES: page_exec_p should moved to the sql-wrapper or Orm layer, keep p4db as tiny.
 
 	var select_one_p = (sql, binding) => exec_p(sql, binding).then(rst => {
-		if (rst && rst.rows && rst.rows[0]) {
-			rst.row = rst.rows[0];
-		}
+		if (rst && rst.rows && rst.rows[0]) { rst.row = rst.rows[0]; }
 		return rst;
 	});
 
@@ -185,13 +192,9 @@ module.exports = function(init_opts){
 		s_v = a_v.join(",");
 		s_kv = a_kv.join(",");
 
-		//NOTES:将来有否机会实现合成 ?
-
+		//NOTES: sqlite not support ON DUPLICATE KEY UPDATE
 		var tmp_table = 'TMP_' + (new Date()).getTime() + Math.ceil(Math.random() * 1000);
 		var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT * FROM (SELECT ${s_v}) AS ${tmp_table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
-
-		//var sql_1 = `INSERT INTO ${table} (${s_k}) SELECT ${s_v} FROM ${table} WHERE NOT EXISTS (SELECT 'Y' FROM ${table} ${where} LIMIT 1)`;
-
 		var sql_2 = `UPDATE ${table} SET ${s_kv} ${where}`;
 
 		var lastID = -1;
@@ -214,7 +217,10 @@ module.exports = function(init_opts){
 			af = rst.af;
 			if (af > 0) { return { STS: "OK", lastID, af }; }
 			else {
-				let {lastID,af} = await exec_p(sql_1);
+				//let {lastID,af} = await exec_p(sql_1);
+				rst = await exec_p(sql_1);
+				lastID = rst.lastID;
+				af=rst.af;
 				return { STS: af > 0 ? 'OK' : 'KO', lastID, af };
 			}
 		}
@@ -223,6 +229,5 @@ module.exports = function(init_opts){
 		if (d > 0) logger.log('p4db.setDebugLevel=', d);
 		debug_level = d;
 	};
-	return { qstr, qstr_arr, exec_p, upsert_p, select_one_p, setDebugLevel };
+	return { qstr, qstr_arr, raw_p, exec_p, upsert_p, select_one_p, setDebugLevel };
 };
-
