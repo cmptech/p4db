@@ -1,5 +1,5 @@
-//@usage: SELECT => {STS, rows} or UPSERT => {STS, lastID, af}
-module.exports = function(init_opts){
+//@spec: SELECT/UPDATE/INSERT/UPSERT => {STS, rows, cols, lastID, af}
+module.exports = function(init_opts={}){
 	var {
 		//common ------------------------
 		database,
@@ -20,7 +20,7 @@ module.exports = function(init_opts){
 		type='mysql',
 		logger = console,
 		debug_level = 1,
-	} = init_opts || {};
+	} = init_opts;
 
 	var pool_a = {};
 
@@ -46,16 +46,18 @@ module.exports = function(init_opts){
 	var P=async(f)=>('function'==typeof f)?new Promise(f):f;
 	var raw_p;
 	var exec_p;
+	var select_p;
 	switch (type) {
 		case 'sqlite3'://this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
 		case 'sqlite':
 
-			var select_p = (s,b)=>P((resolve,reject)=>db.all(s,b,(err,rows)=>err?reject(err):resolve({STS:'OK',rows})));
+			select_p = (s,b)=>P((resolve,reject)=>db.all(s,b,(err,rows)=>err?reject(err):resolve({STS:'OK',rows})));
 
-			raw_p = (opts,binding) => P((resolve,reject) => {
+			raw_p = (opts,binding) => P(async(resolve,reject) => {
 				var {sql,binding}=_tune_opts(opts,binding);
 				if (sql.substr(0, 6).toUpperCase() == 'SELECT') 
-					return select_p(sql,binding);
+					//return select_p(sql,binding);
+					return resolve(await select_p(sql,binding));
 				//db.all(sql, function(err, rows) {
 				//	var row = (rows && rows.length==1) ? rows[0] : undefined;
 				//	if (err) reject(err);
@@ -146,6 +148,8 @@ module.exports = function(init_opts){
 			// TODO _tune_opts()
 			raw_p = (sql,binding) => mysql_promise.createConnection.query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows })) //return [rst,fields];
 
+			select_p = raw_p;//TODO
+
 			//TODO shorten
 			//exec_p = (opts,binding) => _tune_opts(opts,binding) => 
 			exec_p = async(opts, binding) => {
@@ -229,5 +233,5 @@ module.exports = function(init_opts){
 		if (d > 0) logger.log('p4db.setDebugLevel=', d);
 		debug_level = d;
 	};
-	return { qstr, qstr_arr, raw_p, exec_p, upsert_p, select_one_p, setDebugLevel };
+	return { qstr, qstr_arr, raw_p, select_p, exec_p, upsert_p, select_one_p, setDebugLevel };
 };
