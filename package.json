@@ -6,10 +6,4 @@
   "author": "",
   "license": "ISC",
   "homepage": "https://github.com/cmptech/p4db#readme",
-  "dependencies": {
-    "evalcli": "^0.1.0",
-    "mysql2": "^2.0.1",
-    "sqlite3": "^4.1.0",
-    "wrapeval": "^0.3.5"
-  }
 }
