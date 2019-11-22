@@ -140,13 +140,14 @@ module.exports = function(init_opts={}){
 			var pool = pool_a[pool_key];
 
 			//eliminate the warning
+			delete init_opts.debug_level;
 			delete init_opts.logger;
 			delete init_opts.type;
 			if (!pool) pool_a[pool_key] = pool = mysql_promise.createPool(init_opts);
 
 			// {STS, cols, rows, lastID, af}, TODO fields need handling...
 			// TODO _tune_opts()
-			raw_p = (sql,binding) => mysql_promise.createConnection.query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows })) //return [rst,fields];
+			raw_p = (sql,binding) => mysql_promise.createConnection().query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows })) //return [rst,fields];
 
 			select_p = raw_p;//TODO
 
