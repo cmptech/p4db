@@ -1,13 +1,13 @@
 {
   "name": "p4db",
-  "version": "0.2.2",
+  "version": "0.2.3",
   "description": "",
   "main": "p4db.js",
   "author": "",
   "license": "ISC",
   "homepage": "https://github.com/cmptech/p4db#readme",
   "dependencies": {
-    "evalcli": "0.0.8",
+    "evalcli": "^0.1.0",
     "mysql2": "^2.0.1",
     "sqlite3": "^4.1.0",
     "wrapeval": "^0.3.5"

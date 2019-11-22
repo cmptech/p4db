@@ -43,10 +43,13 @@ module.exports = function(init_opts={}){
 		return {sql,binding}
 	};
 
+	//tune_opts_p = async(s,b)=> _tune_opts(s,b);
+
 	var P=async(f)=>('function'==typeof f)?new Promise(f):f;
-	var raw_p;
-	var exec_p;
+	var raw_p;//raw query with always new conn
+	var exec_p;//w+ feature of pooling and retry-on-busy...
 	var select_p;
+	var conn_p;// return a conn which have .exec_p so that can be use times w- create conn again.
 	switch (type) {
 		case 'sqlite3'://this;//@ref https://github.com/mapbox/node-sqlite3/wiki/API
 		case 'sqlite':
@@ -55,21 +58,14 @@ module.exports = function(init_opts={}){
 
 			raw_p = (opts,binding) => P(async(resolve,reject) => {
 				var {sql,binding}=_tune_opts(opts,binding);
-				if (sql.substr(0, 6).toUpperCase() == 'SELECT') 
-					//return select_p(sql,binding);
-					return resolve(await select_p(sql,binding));
-				//db.all(sql, function(err, rows) {
-				//	var row = (rows && rows.length==1) ? rows[0] : undefined;
-				//	if (err) reject(err);
-				//	else resolve({ STS: 'OK', rows, row });
-				//})
-				else
-					db.serialize(function(){
-						db.run(sql, function(err, rst){
-							return err ? reject(err) : resolve({ STS: 'OK', sql, lastID: this.lastID, af: this.changes });
-						})
-					})
+				return (sql.substr(0, 6).toUpperCase() == 'SELECT') ? resolve(await select_p(sql,binding))
+					: db.serialize(()=> db.run(sql, function(err, rows){//avoid arrow to use 'this'
+						return err ? reject(err) : resolve({ STS: 'OK', rows, sql, lastID: this.lastID, af: this.changes });
+					}))
 			})
+
+			//sqlite has no concept of conn...
+			conn_p = async()=>({ exec_p:raw_p });
 
 			var qstr = (s) => ["'", (s==null || s==undefined) ? '' : (''+s).replace(new RegExp("'", 'g'), "''"), "'"].join('');
 
@@ -145,22 +141,26 @@ module.exports = function(init_opts={}){
 			delete init_opts.type;
 			if (!pool) pool_a[pool_key] = pool = mysql_promise.createPool(init_opts);
 
-			// {STS, cols, rows, lastID, af}, TODO fields need handling...
-			// TODO _tune_opts()
-			raw_p = (sql,binding) => mysql_promise.createConnection().query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows })) //return [rst,fields];
-
+			raw_p = async(s,b) =>{
+				var conn = await mysql_promise.createConnection(init_opts);
+				var {sql,binding} = _tune_opts(s,b);
+				return conn.query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows }))
+			}
 			select_p = raw_p;//TODO
-
-			//TODO shorten
-			//exec_p = (opts,binding) => _tune_opts(opts,binding) => 
 			exec_p = async(opts, binding) => {
 				var {sql,binding}=_tune_opts(opts,binding);
 				if (debug_level > 0) logger.log('exec_p.sql=', sql);
-				try{
-					var [rst,fields] = await pool.query(sql,binding);
-					return { STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows };
-				}catch(err){
-					return Promise.reject(err);
+				return pool.query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /* TODO cols/fields, */ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows }))
+			};
+
+			conn_p = async()=>{
+				var conn = await mysql_promise.createConnection(init_opts);
+				return {
+					exec_p:async(opts, binding) => {
+						var {sql,binding}=_tune_opts(opts,binding);
+						if (debug_level > 0) logger.log('conn.exec_p.sql=', sql);
+						return conn.query(sql,binding).then(([rst,fields])=>({ STS: 'OK', /*fields,*/ rows: rst.rsa || rst, lastID: rst.insertId, af: rst.affectedRows }))
+					}
 				}
 			};
 	}
@@ -234,5 +234,5 @@ module.exports = function(init_opts={}){
 		if (d > 0) logger.log('p4db.setDebugLevel=', d);
 		debug_level = d;
 	};
-	return { qstr, qstr_arr, raw_p, select_p, exec_p, upsert_p, select_one_p, setDebugLevel };
+	return { qstr, qstr_arr, raw_p, exec_p, upsert_p, select_one_p, setDebugLevel, conn_p };
 };
